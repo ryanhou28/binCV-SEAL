@@ -2,6 +2,8 @@
 #include <cmath>
 #include <cassert>
 #include <sstream>
+#include <cstdlib>   /* binVIO addition */
+#include <cstdio>    /* binVIO addition */
 
 #include <Eigen/Core>
 
@@ -287,6 +289,36 @@ void TrackerImplementation::add(
     logTracks();
 }
 
+/* binVIO addition (E-11): the detection duty cycle and the detector's yield.
+ * Detection fires when more than a tenth of the track population is missing, so
+ * the duty cycle is a statement about how well the top-up refills -- and that is
+ * invisible in a timer, which reports mean cost per FRAME and hides how often the
+ * cost was paid at all. No-op unless BINVIO_DETECT_STATS is set. */
+namespace {
+struct BinvioDetectStats {
+    unsigned long frames = 0, calls = 0, starved = 0;
+    unsigned long long found = 0, added = 0, missing = 0, liveAtDetect = 0;
+    long radiusMin = 1 << 30, radiusMax = 0;
+    unsigned long long radiusSum = 0;
+    ~BinvioDetectStats() {
+        if (!std::getenv("BINVIO_DETECT_STATS") || !frames) return;
+        std::fprintf(stderr,
+            "BINVIO-DETECT: %lu frames, %lu detections (%.1f%% of frames)\n"
+            "BINVIO-DETECT: %.1f offered -> %.1f added, a detection; %.1f live when "
+            "it fired, gap %.1f\n"
+            "BINVIO-DETECT: mask radius %ld..%ld px (mean %.1f), starved on %lu of %lu\n",
+            frames, calls, 100.0 * double(calls) / double(frames),
+            calls ? double(found) / double(calls) : 0.0,
+            calls ? double(added) / double(calls) : 0.0,
+            calls ? double(liveAtDetect) / double(calls) : 0.0,
+            calls ? double(missing) / double(calls) : 0.0,
+            radiusMin, radiusMax, calls ? double(radiusSum) / double(calls) : 0.0,
+            starved, calls);
+    }
+};
+BinvioDetectStats binvioDetectStats;
+}  // namespace
+
 void TrackerImplementation::detectFeatures(
     Image& image, Image* secondImage,
     std::vector<Feature::Point>& corners, std::vector<Feature::Point>& secondCorners,
@@ -361,6 +393,17 @@ void TrackerImplementation::detectFeatures(
         }
     }
     corners.resize(p);
+    /* binVIO addition (E-11): what one detection yielded. `corners` is post-mask
+     * and post-crop here, so it is what the top-up gets to choose from -- the same
+     * quantity binVIO's own tracker calls `spaced`. */
+    binvioDetectStats.calls++;
+    binvioDetectStats.found += corners.size();
+    {
+        const long r = maskRadius(image);
+        binvioDetectStats.radiusSum += static_cast<unsigned long long>(r);
+        if (r < binvioDetectStats.radiusMin) binvioDetectStats.radiusMin = r;
+        if (r > binvioDetectStats.radiusMax) binvioDetectStats.radiusMax = r;
+    }
     if (stereo) secondCorners.resize(p);
 
     if (corners.size() == 0) return;
@@ -773,8 +816,13 @@ void TrackerImplementation::detectNewFeatures(Image& firstImage, Image* secondIm
     // we already have almost all the track spots filled. In future we might
     // want to investigate alternative feature detection algorithms.
     if (missing >= maxTracks / 10) {
+        binvioDetectStats.liveAtDetect += tracks.size();   /* binVIO addition (E-11) */
+        binvioDetectStats.missing += missing;
+
         detectFeatures(firstImage, secondImage,
             workspace.corners, workspace.secondCorners, output);
+
+        if (workspace.corners.size() < missing) binvioDetectStats.starved++;
 
         std::size_t collected_tracks = 0;
         for (size_t i = 0; i < workspace.corners.size() && collected_tracks < missing; ++i) {
@@ -786,6 +834,7 @@ void TrackerImplementation::detectNewFeatures(Image& firstImage, Image* secondIm
             tracks.push_back(track);
             ++collected_tracks, ++nextTrackId;
         }
+        binvioDetectStats.added += collected_tracks;   /* binVIO addition (E-11) */
     }
     // It's normal if tracks.size() < parameters.tracker.maxTracks.
     assert(tracks.size() <= maxTracks);
@@ -827,6 +876,7 @@ void TrackerImplementation::deleteTrack(int id) {
 }
 
 void TrackerImplementation::logTracks() {
+    binvioDetectStats.frames++;   /* binVIO addition (E-11): once per processed frame */
     if (trackLogCallback) {
         for (const auto &track : tracks) {
             const auto &p = track.points[0];
