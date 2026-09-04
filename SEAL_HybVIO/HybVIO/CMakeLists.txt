@@ -115,6 +115,37 @@ include_directories(${CMAKE_SOURCE_DIR}/SEALPowerEmulator)
 # This causes the targets in feature-tracking/CMakeList.txt to be available
 # here without including the individual source files
 add_subdirectory("src/tracker")
+
+# binVIO addition: the bit-packed frontend. BINVIO_DIR points at a binVIO
+# checkout; the frontend is header-only apart from the HybVIO adapter, and it
+# carries its own pinned binCV. Absent, HybVIO builds exactly as before.
+set(BINVIO_DIR "$ENV{HOME}/binVIO" CACHE PATH "binVIO checkout")
+if(EXISTS "${BINVIO_DIR}/src/binvio/hybvio/bin_image.cpp")
+    add_library(binvio_frontend STATIC
+        "${BINVIO_DIR}/src/binvio/hybvio/bin_image.cpp"
+        # binVIO addition: the backend input recorder/replayer. It has no binCV
+        # dependency -- it only moves tracker::Feature around -- but it lives in
+        # the same target so there is one binVIO library, not two.
+        "${BINVIO_DIR}/src/binvio/backend/replay_tracker.cpp")
+    # LINK bincv_core, do not merely add its include path. binCV carries its SIMD
+    # enablement as INTERFACE properties on that target -- BINCV_HAVE_NEON on
+    # aarch64, -mpopcnt on x86. A consumer that only adds -I compiles the SCALAR
+    # library and every vector kernel is #ifdef'd out, silently.
+    set(BINCV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(BINCV_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(BINCV_USE_OPENCV OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${BINVIO_DIR}/third_party/bincv/bincv-cpp"
+                     "${CMAKE_BINARY_DIR}/bincv" EXCLUDE_FROM_ALL)
+    target_include_directories(binvio_frontend PUBLIC
+        "${BINVIO_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(binvio_frontend PUBLIC bincv_core mobile-cv-suite::core)
+    set_property(TARGET binvio_frontend PROPERTY POSITION_INDEPENDENT_CODE ON)
+    message(STATUS "binVIO frontend: ${BINVIO_DIR}")
+else()
+    message(STATUS "binVIO frontend: not found at ${BINVIO_DIR}, building without it")
+endif()
+
 target_include_directories(tracker PUBLIC ${CMAKE_SOURCE_DIR}/src/tracker)
 
 include_directories("3rdparty/mobile-cv-suite/cereal/include")
@@ -152,6 +183,9 @@ add_library(odometry
 )
 
 target_link_libraries(odometry slam tracker ${LIBS} mobile-cv-suite::core seal SEALPowerEmulator)
+if(TARGET binvio_frontend)
+    target_link_libraries(odometry binvio_frontend)   # binVIO addition
+endif()
 target_include_directories(odometry PUBLIC ".")
 
 if(BUILD_CLI_TOOLS)

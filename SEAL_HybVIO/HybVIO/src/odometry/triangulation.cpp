@@ -1,4 +1,6 @@
 #include "triangulation.hpp"
+
+#include <cstdlib>
 #include "parameters.hpp"
 #include "ekf.hpp"
 #include "debug.hpp"
@@ -7,6 +9,14 @@
 #include "../tracker/camera.hpp"
 
 namespace {
+
+/* binVIO experiment: read once, so the hot loop tests a bool and not the
+ * environment. See docs/MEASUREMENTS.md M-21. */
+bool binvioFastBackend() {
+    static const bool on = std::getenv("BINVIO_FAST_BACKEND") != nullptr;
+    return on;
+}
+
 using Matrix32 = odometry::Triangulator::Matrix32;
 using Matrix23 = odometry::Triangulator::Matrix23;
 
@@ -271,6 +281,30 @@ TriangulatorStatus Triangulator::triangulate(
                 const size_t poseIdx = j / POSE_DIM;
                 const size_t componentIdx = j % POSE_DIM;
                 const bool currentPose = poseIdx == i;
+
+                /* binVIO experiment (M-20/M-21): dRi is non-zero only when
+                 * poseIdx == i and dR0 only when poseIdx == 0 -- 14 columns of
+                 * poseCount*7. For the rest dC and dt are exactly zero, and every
+                 * term built from them can be dropped. The iteration is NOT
+                 * skipped: dpfiab comes from dpfi.col(j), which is non-zero for
+                 * arbitrary j. Enabled by BINVIO_FAST_BACKEND. */
+                if (binvioFastBackend() && !currentPose && poseIdx != 0) {
+                    const Vector3d dpfiab(dpfi(0, j), dpfi(1, j), 0);
+                    const Vector3d dh = C * dpfiab + dpfi(2, j) * t;
+                    const double dih2 = -dh(2) / (h(2)*h(2));
+                    const Vector2d dh02 = dh.segment<2>(0);
+                    const double dih2sq = -2 * dh(2) * ih2sq / h(2);
+                    const Vector2d dErrorBlock = -dh02 / h(2) - dih2 * h02;
+                    Matrix23 dEblock;
+                    dEblock.topLeftCorner<2, 2>() =
+                        -dih2 * C.block(0, 0, 2, 2) +
+                        (dh02 * ih2sq + dih2sq * h02) * C.block(2, 0, 1, 2);
+                    dEblock.block<2, 1>(0, 2) =
+                        -t.segment(0, 2) * dih2 + dh02 * ih2sq * t(2) + h02 * dih2sq * t(2);
+                    dEerror.col(j) += dEblock.transpose() * errorBlock + Eblock.transpose() * dErrorBlock;
+                    dETE.block<3, 3>(0, j * 3) += dEblock.transpose() * Eblock + Eblock.transpose() * dEblock;
+                    continue;
+                }
 
                 Matrix3d dRi = Matrix3d::Zero();
                 Matrix3d dR0 = Matrix3d::Zero();

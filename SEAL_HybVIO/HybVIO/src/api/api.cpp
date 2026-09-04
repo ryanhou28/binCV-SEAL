@@ -18,6 +18,7 @@
 #include "../util/bounded_processing_queue.hpp"
 #include "../tracker/camera.hpp"
 #include "../tracker/image.hpp"
+#include "binvio/hybvio/bin_image.hpp"  /* binVIO addition */
 #include "output_buffer.hpp"
 #include "vio.hpp"
 #include "visualizations.hpp"
@@ -895,6 +896,17 @@ private:
         #endif
         }
         trackerImageFactory = tracker::CpuImage::buildFactory(*imageProcessingQueue, *accImageFactory, *accOpsFactory, parameters.api.parameters);
+        /* binVIO addition: wrap HybVIO's Image factory so the vision frontend runs
+         * on bit-packed binary edge frames instead of 8-bit ones. The wrapper
+         * overrides findKeypoints and opticalFlow ONLY -- colour conversion,
+         * undistortion, rectification and camera handling stay HybVIO's, so the
+         * frame binVIO binarises is the same one the baseline tracks and the A/B
+         * differs in the frontend and nothing else. Off unless asked for, so both
+         * frontends live in the same binary. */
+        if (std::getenv("BINVIO_FRONTEND")) {
+            trackerImageFactory = binvio::buildBinImageFactory(
+                std::move(trackerImageFactory), parameters.api.parameters);
+        }
     }
 
     std::shared_ptr<Image> copyAsColorFrame(Image &input) {

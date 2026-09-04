@@ -19,6 +19,7 @@
 
 // Helpers
 #include "visual_update_stats.hpp"
+#include "binvio/backend/replay_tracker.hpp"  /* binVIO addition */
 
 #include <Eigen/StdVector>
 #include <map>
@@ -185,7 +186,12 @@ struct Session : BackEnd {
         sharedData(std::move(data)),
         parameters(sharedData->parameters),
         ekf(EKF::build(parameters)),
-        tracker(tracker::Tracker::build(parameters)),
+        /* binVIO addition: record the backend's input, or replay it. Paths C and
+         * D replace the backend's implementation, and that comparison is only
+         * honest if every backend sees the same tracks -- binVIO's frontend does
+         * not produce HybVIO's (M-16). Off unless BINVIO_TRACE_RECORD or
+         * BINVIO_TRACE_REPLAY is set, in which case this is the whole hook. */
+        tracker(binvio::buildTraceTracker(parameters, &tracker::Tracker::build)),
         triangulator(parameters.odometry),
         ekfStateIndex(parameters),
         coordTrans(parameters),
@@ -730,6 +736,11 @@ struct Session : BackEnd {
             initializedOrientation = true;
         }
 
+        /* binVIO addition: record the post-sync IMU stream, so a replay drives
+         * the backend with what it actually received rather than reimplementing
+         * SampleSync's pairing. No-op unless BINVIO_TRACE_RECORD is set. */
+        binvio::traceImuSample(sample.t, g.x(), g.y(), g.z(), a.x(), a.y(), a.z());
+
         // KF predict.
         ekf->predict(sample.t, g, a);
         ekf->normalizeQuaternions(true);
@@ -1201,6 +1212,20 @@ struct Session : BackEnd {
                     *ekf, tmp.poseTrailIndex, tmp.imageFeatures, parameters);
             }
 
+            /* binVIO addition: one line per track, for the first few frames. The
+             * frame tallies say THAT two backends disagree; this says which track
+             * and which gate. No-op unless BINVIO_VU_TRACKS is set. */
+            binvio::traceVisualUpdateTrack(sample.frame->num, updateAttemptCount, track.id,
+                nValid, ekfStateIndex.trackScore(track.id, po.trackSampling), minTrackScore,
+                static_cast<int>(triangulateStatus), static_cast<int>(prepareVuStatus),
+                static_cast<int>(outlierStatus),
+                (y.size() == f.size() && y.size() > 0) ? (y - f).norm() : -1.0, H.norm(),
+                [&]{ double t = 0; for (const auto &b : triangulationOut.dpfdp) t += b.squaredNorm();
+                     return std::sqrt(t); }(),
+                [&]{ double t = 0; for (const auto &b : triangulationOut.dpfdq) t += b.squaredNorm();
+                     return std::sqrt(t); }(),
+                ekf->getStateCovarianceRef()(0, 0));
+
             // Stop tracking bad tracks.
             bool shouldBlacklist = outlierStatus != VuOutlierStatus::INLIER;
             bool blacklistedTrack = false;
@@ -1268,6 +1293,11 @@ struct Session : BackEnd {
         ekf->maintainPositiveSemiDefinite();
 
         blacklistedPrev.swap(tmp.blacklisted);
+        /* binVIO addition: one line per frame of what this loop decided, so a
+         * reimplementation can be compared on decisions rather than on the
+         * trajectory they add up to. No-op unless BINVIO_VU_STATS is set. */
+        binvio::traceVisualUpdate(sample.frame->num, updateAttemptCount,
+                                  updateSuccessCount, blacklistedPrev.size());
         stats.visualUpdate.finishFrame();
 
         int constexpr FAILED_UPDATES_THRESHOLD = 5;
