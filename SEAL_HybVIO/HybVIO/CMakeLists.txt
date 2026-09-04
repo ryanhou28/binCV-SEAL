@@ -120,13 +120,13 @@ add_subdirectory("src/tracker")
 # checkout; the frontend is header-only apart from the HybVIO adapter, and it
 # carries its own pinned binCV. Absent, HybVIO builds exactly as before.
 set(BINVIO_DIR "$ENV{HOME}/binVIO" CACHE PATH "binVIO checkout")
-if(EXISTS "${BINVIO_DIR}/src/binvio/hybvio/bin_image.cpp")
+if(EXISTS "${BINVIO_DIR}/src/binvio/host/bin_image.cpp")
     add_library(binvio_frontend STATIC
-        "${BINVIO_DIR}/src/binvio/hybvio/bin_image.cpp"
+        "${BINVIO_DIR}/src/binvio/host/bin_image.cpp"
         # binVIO addition: the backend input recorder/replayer. It has no binCV
         # dependency -- it only moves tracker::Feature around -- but it lives in
         # the same target so there is one binVIO library, not two.
-        "${BINVIO_DIR}/src/binvio/backend/replay_tracker.cpp")
+        "${BINVIO_DIR}/src/binvio/host/replay_tracker.cpp")
     # LINK bincv_core, do not merely add its include path. binCV carries its SIMD
     # enablement as INTERFACE properties on that target -- BINCV_HAVE_NEON on
     # aarch64, -mpopcnt on x86. A consumer that only adds -I compiles the SCALAR

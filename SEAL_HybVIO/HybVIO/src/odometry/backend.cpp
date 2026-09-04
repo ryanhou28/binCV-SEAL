@@ -19,7 +19,7 @@
 
 // Helpers
 #include "visual_update_stats.hpp"
-#include "binvio/backend/replay_tracker.hpp"  /* binVIO addition */
+#include "binvio/host/replay_tracker.hpp"  /* binVIO addition */
 
 #include <Eigen/StdVector>
 #include <map>

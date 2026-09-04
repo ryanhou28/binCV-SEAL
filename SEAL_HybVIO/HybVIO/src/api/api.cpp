@@ -18,7 +18,7 @@
 #include "../util/bounded_processing_queue.hpp"
 #include "../tracker/camera.hpp"
 #include "../tracker/image.hpp"
-#include "binvio/hybvio/bin_image.hpp"  /* binVIO addition */
+#include "binvio/host/bin_image.hpp"  /* binVIO addition */
 #include "output_buffer.hpp"
 #include "vio.hpp"
 #include "visualizations.hpp"
