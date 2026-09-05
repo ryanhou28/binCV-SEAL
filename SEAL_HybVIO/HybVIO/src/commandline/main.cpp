@@ -3,6 +3,7 @@
 #include <thread>
 #include <future>
 #include <string.h>
+#include <cstdlib>   /* binVIO addition */
 
 #include "input.hpp"
 #include "../commandline/command_queue.hpp"
@@ -336,6 +337,23 @@ std::unique_ptr<odometry::InputI> setupInputAndOutput(
     }
 
     // Setup video inputs.
+    /* binVIO addition: force the ffmpeg-binary video reader.
+     *
+     * OpenCV 4.3 cannot compile against this platform's FFmpeg 7.1, so the suite
+     * is built with -DWITH_FFMPEG=OFF and cv::VideoCapture cannot open an mp4.
+     * HybVIO has a second reader that pipes from the ffmpeg BINARY, selected by
+     * tracker.ffmpeg -- but that parameter does not arrive. Setting it in
+     * parameters.txt parses: an invalid key there throws, and an int parameter
+     * set the same way DOES take effect. VideoInput::build still saw false.
+     * The command line does not help either, because parameters.txt is applied
+     * after it. Rather than keep reverse-engineering the plumbing, set it here,
+     * where it is unambiguous.
+     *
+     * This changes how frames are DECODED and nothing about the algorithm: the
+     * per-stage timers and the trajectory are unaffected. */
+    if (std::getenv("BINVIO_FORCE_FFMPEG")) {
+        cmd.parameters.tracker.ffmpeg = true;
+    }
     for (int cameraInd : getCameraInds(cmd)) {
         std::string videoPath = input->getInputVideoPath(cameraInd);
         videoConfig.videoInputs[cameraInd] = VideoInput::build(
