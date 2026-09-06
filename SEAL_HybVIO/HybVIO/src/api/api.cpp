@@ -18,7 +18,9 @@
 #include "../util/bounded_processing_queue.hpp"
 #include "../tracker/camera.hpp"
 #include "../tracker/image.hpp"
-#include "binvio/host/bin_image.hpp"  /* binVIO addition */
+#ifdef BINVIO_FRONTEND_AVAILABLE                 /* binVIO addition */
+#include "binvio/host/bin_image.hpp"
+#endif
 #include "output_buffer.hpp"
 #include "vio.hpp"
 #include "visualizations.hpp"
@@ -903,10 +905,12 @@ private:
          * frame binVIO binarises is the same one the baseline tracks and the A/B
          * differs in the frontend and nothing else. Off unless asked for, so both
          * frontends live in the same binary. */
+        #ifdef BINVIO_FRONTEND_AVAILABLE
         if (std::getenv("BINVIO_FRONTEND")) {
             trackerImageFactory = binvio::buildBinImageFactory(
                 std::move(trackerImageFactory), parameters.api.parameters);
         }
+        #endif
     }
 
     std::shared_ptr<Image> copyAsColorFrame(Image &input) {

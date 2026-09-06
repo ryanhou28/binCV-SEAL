@@ -7,6 +7,9 @@
 #include "rot_ransac.hpp"
 #include "five_point.hpp"
 #include "stereo_upright_2p.hpp"
+#ifdef BINVIO_FRONTEND_AVAILABLE                  /* binVIO addition */
+#include "binvio/host/bin_ransac.hpp"
+#endif
 #include "../util/logging.hpp"
 #include "../util/timer.hpp"
 
@@ -398,6 +401,15 @@ private:
 }
 
 std::unique_ptr<RansacPipeline> RansacPipeline::build(int w, int h, const odometry::Parameters& p) {
+    /* binVIO addition: the second seam. RANSAC-2 and RANSAC-5 over binCV's
+     * five-point solver instead of OpenCV's vendored one, which is the last
+     * OpenCV computation the frontend path executes. It is 10.47 ms of a 78.94 ms
+     * frame on a Pi 4 with binVIO's frontend, against 5.42 of 89.19 for the
+     * baseline -- see src/binvio/host/bin_ransac.hpp for why it grew and why this
+     * is off unless asked for. */
+#ifdef BINVIO_FRONTEND_AVAILABLE
+    if (binvio::ransacFromEnv()) return binvio::buildBinRansacPipeline(w, h, p);
+#endif
     return std::unique_ptr<RansacPipeline>(new RansacPipelineImplementation(w, h, p));
 }
 }

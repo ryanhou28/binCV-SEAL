@@ -126,7 +126,12 @@ if(EXISTS "${BINVIO_DIR}/src/binvio/host/bin_image.cpp")
         # binVIO addition: the backend input recorder/replayer. It has no binCV
         # dependency -- it only moves tracker::Feature around -- but it lives in
         # the same target so there is one binVIO library, not two.
-        "${BINVIO_DIR}/src/binvio/host/replay_tracker.cpp")
+        "${BINVIO_DIR}/src/binvio/host/replay_tracker.cpp"
+        # binVIO addition: RANSAC-2 and RANSAC-5 over binCV, behind BINVIO_RANSAC.
+        # `rot_ransac.cpp` is the one piece of it that touches no camera and so is
+        # not a template; the rest is header-only.
+        "${BINVIO_DIR}/src/binvio/host/bin_ransac.cpp"
+        "${BINVIO_DIR}/src/binvio/frontend/rot_ransac.cpp")
     # LINK bincv_core, do not merely add its include path. binCV carries its SIMD
     # enablement as INTERFACE properties on that target -- BINCV_HAVE_NEON on
     # aarch64, -mpopcnt on x86. A consumer that only adds -I compiles the SCALAR
@@ -140,7 +145,22 @@ if(EXISTS "${BINVIO_DIR}/src/binvio/host/bin_image.cpp")
         "${BINVIO_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(binvio_frontend PUBLIC bincv_core mobile-cv-suite::core)
+    # PUBLIC, so it reaches every target that links this one. The two seams in
+    # HybVIO's own sources are guarded on it, which is what makes the claim above
+    # -- "absent a binVIO checkout, HybVIO builds exactly as before" -- true. It
+    # was not: both seams `#include "binvio/..."` unconditionally, and the include
+    # path they need is added only inside this block, so a tree without BINVIO_DIR
+    # failed to compile rather than building as before.
+    target_compile_definitions(binvio_frontend PUBLIC BINVIO_FRONTEND_AVAILABLE)
     set_property(TARGET binvio_frontend PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # `tracker` calls into binVIO too, since RansacPipeline::build is the second
+    # seam. Declaring it here rather than in src/tracker/CMakeLists.txt keeps that
+    # file untouched -- and a static library whose dependency CMake does not know
+    # about links in whatever order the generator happens to emit. HybVIO's
+    # cmake_minimum_required predates CMP0079, which is what allows a target to be
+    # linked from outside the directory that defined it; set it for this file only.
+    cmake_policy(SET CMP0079 NEW)
+    target_link_libraries(tracker binvio_frontend)
     message(STATUS "binVIO frontend: ${BINVIO_DIR}")
 else()
     message(STATUS "binVIO frontend: not found at ${BINVIO_DIR}, building without it")
