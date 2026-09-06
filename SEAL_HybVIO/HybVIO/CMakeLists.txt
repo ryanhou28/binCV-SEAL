@@ -152,6 +152,23 @@ if(EXISTS "${BINVIO_DIR}/src/binvio/host/bin_image.cpp")
     # path they need is added only inside this block, so a tree without BINVIO_DIR
     # failed to compile rather than building as before.
     target_compile_definitions(binvio_frontend PUBLIC BINVIO_FRONTEND_AVAILABLE)
+    # RELEASE FLAGS, PRIVATE, AND THIS IS A FAIRNESS FIX RATHER THAN A TWEAK.
+    #
+    # This file sets "-O2" by hand at line 5 and never defines NDEBUG, and there
+    # is no CMAKE_BUILD_TYPE. OpenCV reaches HybVIO as a prebuilt Release library,
+    # so that costs OpenCV nothing -- but binCV is HEADER-ONLY, so it is compiled
+    # into these objects under whatever this file says, which is -O2 with every
+    # BINCV_ASSERT live. The A/B has therefore been comparing a debug-configured
+    # binCV against a release-configured OpenCV since the seam was written.
+    #
+    # PRIVATE, so HybVIO's own translation units -- and the baseline they produce
+    # -- are compiled exactly as before and the denominator does not move.
+    # bin_image.hpp keeps binCV out of api.cpp so that this stays possible; if a
+    # binCV header ever reappears there, binCV's ABI namespace makes it a link
+    # error (v1_checked_throwing vs v1_unchecked_throwing) rather than a silent
+    # slowdown.
+    target_compile_options(binvio_frontend PRIVATE -O3)
+    target_compile_definitions(binvio_frontend PRIVATE NDEBUG)
     set_property(TARGET binvio_frontend PROPERTY POSITION_INDEPENDENT_CODE ON)
     # `tracker` calls into binVIO too, since RansacPipeline::build is the second
     # seam. Declaring it here rather than in src/tracker/CMakeLists.txt keeps that
