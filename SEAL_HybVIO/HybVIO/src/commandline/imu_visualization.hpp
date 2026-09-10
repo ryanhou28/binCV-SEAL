@@ -21,10 +21,23 @@ private:
     double scale;
 
 public:
+    /* binVIO addition: the canvas is allocated by draw(), not here.
+     *
+     * main.cpp constructs FOUR of these unconditionally, and each held a
+     * 1 280 072-byte CV_8UC4 canvas from the moment it existed -- 4.88 MB in a
+     * run built BUILD_VISUALIZATIONS=OFF and invoked -displayVideo=false.
+     * [TR-03](../../../../docs/reports/TR-03-where-the-memory-goes.md) measured
+     * it as 16.7% of bincv-seal-binary's heap and said "the fix is an if".
+     *
+     * Both call sites in main.cpp are already guarded by displayImuSamples; only
+     * the ALLOCATION was not. Deferring it to draw() leaves those guards as the
+     * single condition and needs no change at either of them.
+     *
+     * cv::Mat is reference-counted and empty-by-default, so an unused
+     * visualisation now costs the vector, the scalar and the double. */
     ImuVisualization(double scale) :
         buffer(),
         bgColor(cv::Scalar(gray, gray, gray, 0xff)),
-        canvas(cv::Mat(H, W, CV_8UC4, bgColor)),
         scale(scale)
     {}
 
@@ -36,6 +49,7 @@ public:
     }
 
     const cv::Mat &draw(double t) {
+        if (canvas.empty()) canvas = cv::Mat(H, W, CV_8UC4, bgColor);  /* binVIO */
         canvas = bgColor;
 
         constexpr double T_WINDOW_BACK = 5.0;
